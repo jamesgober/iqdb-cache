@@ -26,7 +26,7 @@
     <br>
     <hr>
     <p>
-        <strong>MSRV is 1.87+</strong> (Rust 2024 edition). LRU result cache. Mutation-exact invalidation. Off by default.
+        <strong>MSRV is 1.87+</strong> (Rust 2024 edition). LRU result cache. Mutation-exact invalidation. Optional TTL. Off by default.
     </p>
     <blockquote>
         <strong>Status: pre-1.0, in active development.</strong> The public API is being designed across the 0.x series and frozen at <code>1.0.0</code>. See <a href="./CHANGELOG.md"><code>CHANGELOG.md</code></a>.
@@ -41,6 +41,7 @@
 - **Transparent wrapper** &mdash; `CachedIndex<I>` implements `IndexCore`, so it slots in anywhere the wrapped index does, including behind `Box<dyn IndexCore>`
 - **Result memoization** &mdash; identical searches (same query, same `SearchParams`) are served from an in-memory cache instead of re-running
 - **Mutation-exact invalidation** &mdash; every `insert` / `insert_batch` / `delete` clears the cache, so a search **never** observes a stale result
+- **Optional TTL** &mdash; give entries an expiry to bound staleness from changes the wrapper can't see; off by default, and verified deterministically with a mock clock
 - **Bounded LRU** &mdash; an arena-backed least-recently-used cache with amortized `O(1)` lookup, insert, and eviction; the footprint never exceeds the configured capacity
 - **Off by default** &mdash; size the cache, or disable it with capacity `0` for a pure passthrough to A/B the cache's effect without touching call sites
 - **Hit/miss stats** &mdash; `CacheStats` exposes lifetime hit and miss counters plus a `hit_rate` for tuning
@@ -52,7 +53,7 @@
 
 ```toml
 [dependencies]
-iqdb-cache = "0.2"
+iqdb-cache = "0.3"
 ```
 
 <br>
@@ -115,6 +116,21 @@ let after = cached.search(&[0.0, 0.0, 0.0], &params).expect("search");
 assert_eq!(after.len(), before.len() + 1);
 ```
 
+Give entries a time-to-live to bound staleness from changes made behind the wrapper's back — through a `CacheConfig` (the Tier-2 path):
+
+```rust
+use std::time::Duration;
+
+use iqdb_cache::{CacheConfig, CachedIndex};
+
+let config = CacheConfig::new()
+    .capacity(4096)
+    .ttl(Duration::from_secs(300)); // results reused within 5 min are hits
+
+let cached = CachedIndex::with_config(iqdb_cache::doc_stub::stub_index(), config);
+assert_eq!(cached.ttl(), Some(Duration::from_secs(300)));
+```
+
 <br>
 
 ## Errors
@@ -127,13 +143,16 @@ cached, so a later identical search re-runs against the index.
 
 ## Status
 
-<code>v0.2.0</code> &mdash; the `CachedIndex` wrapper and the bounded LRU result
-cache, with mutation-exact invalidation. Every core invariant is property-tested
-against a brute-force reference index (the cache is transparent; a write is never
-stale), concurrent reads are covered, and the hit path is benchmarked with
-`criterion`. Result-cache TTL, additional eviction policies (LFU / FIFO / ARC),
-and `loom` concurrency model-checks land across the rest of the 0.x series per
-the <a href="./dev/ROADMAP.md"><code>ROADMAP</code></a>. The full surface is
+<code>v0.3.0</code> &mdash; the `CachedIndex` wrapper, the bounded LRU result cache
+with mutation-exact invalidation, and an optional per-entry TTL (via `clock-lib`,
+so expiry is tested deterministically with a mock clock). Every core invariant is
+property-tested against a brute-force reference index (the cache is transparent; a
+write is never stale), concurrent reads are covered, and the hit path is
+benchmarked: on the reference machine a 10k-vector / dim-64 search costs **~234&nbsp;µs**
+uncached versus **~238&nbsp;ns** from cache — a ~985&times; speedup — with a TTL
+adding ~29&nbsp;ns for the clock read. Additional eviction policies (LFU / FIFO /
+ARC) and `loom` concurrency model-checks land across the rest of the 0.x series
+per the <a href="./dev/ROADMAP.md"><code>ROADMAP</code></a>. The full surface is
 documented in <a href="./docs/API.md"><code>docs/API.md</code></a>.
 
 <hr>
@@ -147,7 +166,7 @@ documented in <a href="./docs/API.md"><code>docs/API.md</code></a>.
 - `iqdb-index` &mdash; the `IndexCore` trait it wraps
 - `iqdb` &mdash; exposes caching via the database builder
 
-It is unblocked today: both first-party dependencies (`iqdb-types`, `iqdb-index`) are stable at 1.0.
+It is unblocked today: its first-party dependencies (`iqdb-types`, `iqdb-index`, and `clock-lib` for TTL) are all stable at 1.0.
 
 <br>
 

@@ -9,7 +9,7 @@
 #╚═══════════════════════════════╝
 [package]
 name    = "iqdb-cache"
-version = "0.2.0"
+version = "0.3.0"
 
 # Minimum Supported Rust Version (MSRV)
 rust-version = "1.87"
@@ -76,6 +76,8 @@ serde = ["dep:serde"]
 iqdb-types = "1.0.0"
 # The trait this crate wraps: any `IndexCore` becomes a `CachedIndex`.
 iqdb-index = "1.0.0"
+# Monotonic, mockable time for result-cache TTL (the iQDB time standard).
+clock-lib = "1.0.0"
 # Optional: `CacheStats` serialization.
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 

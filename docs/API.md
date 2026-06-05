@@ -1,7 +1,7 @@
 # iqdb-cache &mdash; API Reference
 
 > Complete reference for **every** public item in `iqdb-cache` as of
-> **v0.2.0**: what it is, its parameters and return shape, the traits it
+> **v0.3.0**: what it is, its parameters and return shape, the traits it
 > implements, and worked examples for each use case.
 >
 > **Status: pre-1.0.** The public surface is being designed across the 0.x
@@ -14,17 +14,19 @@
 - [Overview](#overview)
 - [Crate constants](#crate-constants)
   - [`VERSION`](#version)
+- [Configuration](#configuration)
+  - [`CacheConfig`](#cacheconfig)
 - [The cache wrapper](#the-cache-wrapper)
   - [`CachedIndex`](#cachedindex)
-  - [Construction &mdash; `new` / `with_capacity`](#construction)
+  - [Construction &mdash; `new` / `with_capacity` / `with_config`](#construction)
   - [Searching through the cache](#searching-through-the-cache)
   - [Mutation &amp; invalidation](#mutation--invalidation)
-  - [Introspection &mdash; `capacity`, `is_enabled`, `get_ref`, `into_inner`, `clear_cache`](#introspection)
+  - [Time-to-live](#time-to-live)
+  - [Introspection &mdash; `capacity`, `ttl`, `is_enabled`, `get_ref`, `into_inner`, `clear_cache`](#introspection)
 - [Statistics](#statistics)
   - [`CacheStats`](#cachestats)
   - [`cache_stats`](#cache_stats)
 - [Eviction policies](#eviction-policies) _(planned: 0.4)_
-- [Time-to-live](#time-to-live) _(planned: 0.3)_
 - [Errors](#errors)
 - [Feature flags](#feature-flags)
 - [Trait implementation matrix](#trait-implementation-matrix)
@@ -73,6 +75,44 @@ string. Useful in diagnostics and version-skew checks across the iqdb family.
 ```rust
 let v = iqdb_cache::VERSION;
 assert_eq!(v.split('.').count(), 3);
+```
+
+---
+
+## Configuration
+
+### `CacheConfig`
+
+```rust
+pub struct CacheConfig { /* private */ }
+```
+
+The Tier-2 tuning surface: capacity and an optional TTL, set together and handed
+to [`CachedIndex::with_config`](#cachedindex-with_config). Built with a chaining
+builder; every setting has a default, so `CacheConfig::new()` alone is valid.
+Implements `Debug`, `Clone`, `PartialEq`, and `Eq`.
+
+| Method | Default | Effect |
+|---|---|---|
+| `CacheConfig::new()` | &mdash; | Capacity `1024`, no TTL. |
+| `.capacity(n: usize)` | `1024` | Max distinct cached searches; `0` disables caching. |
+| `.ttl(d: Duration)` | none | Per-entry time-to-live; expired results are recomputed. |
+| `.no_ttl()` | &mdash; | Clears a previously set TTL. |
+
+All setters take `self` and return `Self`.
+
+```rust
+use std::time::Duration;
+
+use iqdb_cache::{CacheConfig, CachedIndex};
+
+let config = CacheConfig::new()
+    .capacity(4096)
+    .ttl(Duration::from_secs(30));
+
+let cached = CachedIndex::with_config(iqdb_cache::doc_stub::stub_index(), config);
+assert_eq!(cached.capacity(), 4096);
+assert_eq!(cached.ttl(), Some(Duration::from_secs(30)));
 ```
 
 ---
@@ -156,6 +196,30 @@ let bypass = CachedIndex::with_capacity(iqdb_cache::doc_stub::stub_index(), 0);
 assert!(!bypass.is_enabled());
 ```
 
+<a id="cachedindex-with_config"></a>
+#### `CachedIndex::with_config`
+
+```rust
+pub fn with_config(inner: I, config: CacheConfig) -> Self
+```
+
+Wraps `inner` from a [`CacheConfig`](#cacheconfig) — the Tier-2 path that sets
+capacity and an optional TTL together. `new` and `with_capacity` are thin
+shortcuts over this.
+
+```rust
+use std::time::Duration;
+
+use iqdb_cache::{CacheConfig, CachedIndex};
+
+let cached = CachedIndex::with_config(
+    iqdb_cache::doc_stub::stub_index(),
+    CacheConfig::new().capacity(512).ttl(Duration::from_secs(30)),
+);
+assert_eq!(cached.capacity(), 512);
+assert_eq!(cached.ttl(), Some(Duration::from_secs(30)));
+```
+
 ### Searching through the cache
 
 `CachedIndex` implements [`IndexCore`], so you search it exactly like any index.
@@ -233,6 +297,42 @@ let after = cached.search(&[0.0, 0.0, 0.0], &params).expect("search");
 assert_eq!(after.len(), before.len() + 1);
 ```
 
+### Time-to-live
+
+When a [`CacheConfig::ttl`](#cacheconfig) is set, each cached result carries the
+moment it was stored. On a lookup, an entry whose age has reached the TTL is
+treated as a **miss** and recomputed; the fresh result replaces it. With no TTL
+(the default), the clock is never read.
+
+TTL and mutation invalidation are independent guarantees:
+
+- **Mutation invalidation** is exact and immediate — a write through the wrapper
+  drops the whole cache, so a search after a write is never stale.
+- **TTL** bounds the age of an entry against changes the wrapper *cannot* see —
+  for example, the wrapped index mutated through a different handle, or an
+  external data source behind it.
+
+The time source is `clock-lib`. Production uses a monotonic system clock; the
+crate's own tests inject a mock clock so expiry is verified without sleeping.
+
+```rust
+use std::time::Duration;
+
+use iqdb_cache::{CacheConfig, CachedIndex};
+use iqdb_index::IndexCore;
+use iqdb_types::{DistanceMetric, SearchParams};
+
+// A 5-minute TTL: a result reused within 5 minutes is a hit; after that it is
+// recomputed even if nothing was written through the wrapper.
+let cached = CachedIndex::with_config(
+    iqdb_cache::doc_stub::stub_index(),
+    CacheConfig::new().ttl(Duration::from_secs(300)),
+);
+let params = SearchParams::new(1, DistanceMetric::Cosine);
+let _ = cached.search(&[1.0, 0.0, 0.0], &params).expect("search");
+assert_eq!(cached.ttl(), Some(Duration::from_secs(300)));
+```
+
 ### Introspection
 
 #### `capacity`
@@ -243,6 +343,15 @@ pub fn capacity(&self) -> usize
 
 The configured maximum number of cached searches. `0` means caching is
 disabled.
+
+#### `ttl`
+
+```rust
+pub fn ttl(&self) -> Option<Duration>
+```
+
+The configured per-entry time-to-live, or `None` when results expire only on
+mutation.
 
 #### `is_enabled`
 
@@ -378,18 +487,9 @@ assert!(stats.hit_rate() > 0.0);
 
 _(planned: 0.4)_
 
-v0.2 ships a single eviction policy: least-recently-used (LRU). LFU, FIFO, and
-ARC, selectable through a builder, land at 0.4 with a feature freeze.
-
----
-
-## Time-to-live
-
-_(planned: 0.3)_
-
-v0.2 invalidates on mutation only. A per-entry time-to-live, so cached results
-also expire after a configured duration, lands at 0.3 alongside finer
-invalidation.
+v0.3 ships a single eviction policy: least-recently-used (LRU). LFU, FIFO, and
+ARC, selectable through [`CacheConfig`](#cacheconfig), land at 0.4 with a
+feature freeze.
 
 ---
 
@@ -418,6 +518,7 @@ first-party crates, `iqdb-types` and `iqdb-index`, which are always pulled.
 | Type | `Debug` | `Clone` | `Copy` | `PartialEq` / `Eq` | `IndexCore` | `serde` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `CachedIndex<I>` | — | — | — | — | ✅ (when `I: IndexCore`) | — |
+| `CacheConfig` | ✅ | ✅ | — | ✅ | — | — |
 | `CacheStats` | ✅ | ✅ | ✅ | ✅ | — | ✅ (feature) |
 
 ---

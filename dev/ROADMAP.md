@@ -27,10 +27,15 @@ Exit criteria:
 
 ---
 
-## v0.3.0 -- result cache with TTL + invalidation
+## v0.3.0 -- result cache with TTL + invalidation (DONE)
+
+Per-entry time-to-live via `clock-lib` (mockable, so TTL is tested
+deterministically). `CacheConfig` builder + `with_config`. Mutation invalidation
+stays exact; TTL bounds staleness from changes the wrapper cannot observe.
 
 Exit criteria:
-- [ ] New surface tested and benchmarked where it is a hot path.
+- [x] New surface tested (deterministic TTL unit tests + public-config
+  integration suite) and benchmarked (`cache_hit_ttl`).
 
 ---
 

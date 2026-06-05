@@ -1,18 +1,29 @@
 //! The [`CachedIndex`] wrapper.
 
+use core::time::Duration;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use clock_lib::{Clock, Monotonic, SystemClock};
 use iqdb_index::{IndexCore, IndexStats};
 use iqdb_types::{DistanceMetric, Hit, Metadata, Result, SearchParams, VectorId};
 
+use crate::config::CacheConfig;
 use crate::key::ResultKey;
 use crate::lru::LruCache;
 use crate::stats::CacheStats;
 
-/// Default cache capacity used by [`CachedIndex::new`]: the number of distinct
-/// recent searches whose results are kept resident.
-const DEFAULT_CAPACITY: usize = 1024;
+/// A cached search result plus the moment it was stored.
+///
+/// `stamp` is recorded only when a TTL is configured; with no TTL it is `None`
+/// and the entry never expires on time.
+struct CacheEntry {
+    /// The memoized hits, ready to clone out on a hit.
+    hits: Box<[Hit]>,
+    /// When the entry was written, for TTL expiry; `None` when no TTL applies.
+    stamp: Option<Monotonic>,
+}
 
 /// A drop-in [`IndexCore`] wrapper that memoizes search results.
 ///
@@ -37,9 +48,18 @@ const DEFAULT_CAPACITY: usize = 1024;
 /// Caching is an optimization a caller chooses by wrapping an index; the
 /// database leaves indexes unwrapped by default. Construct a cache that holds
 /// a fixed number of recent searches with [`new`](CachedIndex::new) or
-/// [`with_capacity`](CachedIndex::with_capacity). A capacity of `0` disables
-/// caching entirely: every search passes straight through, which is useful for
-/// A/B measuring the cache's effect without changing call sites.
+/// [`with_capacity`](CachedIndex::with_capacity), or tune it through a
+/// [`CacheConfig`] with [`with_config`](CachedIndex::with_config). A capacity of
+/// `0` disables caching entirely: every search passes straight through, which is
+/// useful for A/B measuring the cache's effect without changing call sites.
+///
+/// ## Time-to-live
+///
+/// A [`CacheConfig::ttl`] gives entries an expiry: a cached result older than
+/// the TTL is treated as a miss and recomputed. Mutations through this wrapper
+/// already invalidate exactly, so the TTL exists to bound staleness from changes
+/// the wrapper *cannot* see — for example, the wrapped index mutated through
+/// another handle. With no TTL (the default) the clock is never consulted.
 ///
 /// ## Concurrency
 ///
@@ -106,9 +126,15 @@ pub struct CachedIndex<I> {
     /// The wrapped index every call forwards to.
     inner: I,
     /// The result cache, guarded for `&self` search access.
-    cache: Mutex<LruCache<ResultKey, Box<[Hit]>>>,
+    cache: Mutex<LruCache<ResultKey, CacheEntry>>,
     /// Configured capacity, mirrored here for `0`-means-disabled fast paths.
     capacity: usize,
+    /// Optional per-entry time-to-live; `None` means entries expire only on
+    /// mutation.
+    ttl: Option<Duration>,
+    /// Time source for TTL expiry. `SystemClock` in production; a mock clock is
+    /// injected in tests. Only read when `ttl` is `Some`.
+    clock: Arc<dyn Clock>,
     /// Lifetime count of cache hits.
     hits: AtomicU64,
     /// Lifetime count of cache misses.
@@ -117,7 +143,7 @@ pub struct CachedIndex<I> {
 
 impl<I: IndexCore> CachedIndex<I> {
     /// Wraps `inner` with a result cache of the default capacity (1024 recent
-    /// searches).
+    /// searches) and no TTL.
     ///
     /// # Examples
     ///
@@ -129,11 +155,11 @@ impl<I: IndexCore> CachedIndex<I> {
     /// ```
     #[must_use]
     pub fn new(inner: I) -> Self {
-        Self::with_capacity(inner, DEFAULT_CAPACITY)
+        Self::with_config(inner, CacheConfig::new())
     }
 
     /// Wraps `inner` with a result cache that holds at most `capacity` recent
-    /// searches.
+    /// searches and no TTL.
     ///
     /// A `capacity` of `0` disables caching: searches pass straight through and
     /// nothing is stored.
@@ -151,10 +177,39 @@ impl<I: IndexCore> CachedIndex<I> {
     /// ```
     #[must_use]
     pub fn with_capacity(inner: I, capacity: usize) -> Self {
+        Self::with_config(inner, CacheConfig::new().capacity(capacity))
+    }
+
+    /// Wraps `inner` with a result cache built from `config` (the Tier-2 path).
+    ///
+    /// Use [`CacheConfig`] to set the capacity and an optional TTL together.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use iqdb_cache::{CacheConfig, CachedIndex};
+    /// # use iqdb_cache::doc_stub::stub_index;
+    /// let config = CacheConfig::new().capacity(512).ttl(Duration::from_secs(30));
+    /// let cached = CachedIndex::with_config(stub_index(), config);
+    /// assert_eq!(cached.capacity(), 512);
+    /// assert_eq!(cached.ttl(), Some(Duration::from_secs(30)));
+    /// ```
+    #[must_use]
+    pub fn with_config(inner: I, config: CacheConfig) -> Self {
+        Self::with_config_in(inner, config, Arc::new(SystemClock::new()))
+    }
+
+    /// Construction core shared by every public constructor, with an injectable
+    /// clock for deterministic TTL tests.
+    pub(crate) fn with_config_in(inner: I, config: CacheConfig, clock: Arc<dyn Clock>) -> Self {
         Self {
             inner,
-            cache: Mutex::new(LruCache::with_capacity(capacity)),
-            capacity,
+            cache: Mutex::new(LruCache::with_capacity(config.capacity)),
+            capacity: config.capacity,
+            ttl: config.ttl,
+            clock,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         }
@@ -165,6 +220,14 @@ impl<I: IndexCore> CachedIndex<I> {
     #[must_use]
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// The configured per-entry time-to-live, or `None` if results expire only
+    /// on mutation.
+    #[inline]
+    #[must_use]
+    pub fn ttl(&self) -> Option<Duration> {
+        self.ttl
     }
 
     /// Whether caching is active (`capacity > 0`).
@@ -227,10 +290,22 @@ impl<I: IndexCore> CachedIndex<I> {
     /// A poisoned result cache is safe to keep using: a half-finished insert
     /// can at worst drop or duplicate a memoized entry, never corrupt a result,
     /// so recovery is preferable to propagating the panic.
-    fn lock_cache(&self) -> std::sync::MutexGuard<'_, LruCache<ResultKey, Box<[Hit]>>> {
+    fn lock_cache(&self) -> std::sync::MutexGuard<'_, LruCache<ResultKey, CacheEntry>> {
         self.cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Whether a cached entry is still live under the configured TTL.
+    ///
+    /// Always `true` when no TTL is set, so the clock is never read on the
+    /// non-TTL hot path.
+    #[inline]
+    fn is_live(&self, entry: &CacheEntry) -> bool {
+        match (self.ttl, entry.stamp) {
+            (Some(ttl), Some(stamp)) => self.clock.now().saturating_duration_since(stamp) < ttl,
+            _ => true,
+        }
     }
 
     /// Empties the cache through `&mut self` after a mutation.
@@ -285,19 +360,30 @@ impl<I: IndexCore> IndexCore for CachedIndex<I> {
         let key = ResultKey::new(query, params);
         {
             let mut cache = self.lock_cache();
-            if let Some(hits) = cache.get(&key) {
-                let _ = self.hits.fetch_add(1, Ordering::Relaxed);
-                return Ok(hits.to_vec());
+            if let Some(entry) = cache.get(&key) {
+                if self.is_live(entry) {
+                    let _ = self.hits.fetch_add(1, Ordering::Relaxed);
+                    return Ok(entry.hits.to_vec());
+                }
+                // Expired: fall through to recompute. The stale entry stays
+                // until the `put` below overwrites it with a fresh result.
             }
         }
 
-        // Miss: run the search without holding the lock so concurrent misses
-        // do not serialize on it.
+        // Miss (or expired): run the search without holding the lock so
+        // concurrent misses do not serialize on it.
         let hits = self.inner.search(query, params)?;
         let _ = self.misses.fetch_add(1, Ordering::Relaxed);
+        let stamp = self.ttl.map(|_| self.clock.now());
         {
             let mut cache = self.lock_cache();
-            let _evicted = cache.put(key, hits.clone().into_boxed_slice());
+            let _evicted = cache.put(
+                key,
+                CacheEntry {
+                    hits: hits.clone().into_boxed_slice(),
+                    stamp,
+                },
+            );
         }
         Ok(hits)
     }
@@ -326,5 +412,74 @@ impl<I: IndexCore> IndexCore for CachedIndex<I> {
 
     fn stats(&self) -> IndexStats {
         self.inner.stats()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use clock_lib::ManualClock;
+
+    use super::*;
+    use crate::doc_stub::stub_index;
+
+    fn params() -> SearchParams {
+        SearchParams::new(1, DistanceMetric::Cosine)
+    }
+
+    #[test]
+    fn ttl_entry_is_recomputed_after_expiry() {
+        let clock = Arc::new(ManualClock::new());
+        let config = CacheConfig::new().capacity(8).ttl(Duration::from_secs(60));
+        let cached = CachedIndex::with_config_in(stub_index(), config, clock.clone());
+
+        let _miss = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        let _hit = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        assert_eq!(cached.cache_stats().hits, 1);
+
+        // Just inside the TTL: still a hit.
+        clock.advance(Duration::from_secs(59));
+        let _hit2 = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        assert_eq!(cached.cache_stats().hits, 2);
+
+        // Past the TTL: the entry expires and the search recomputes (a miss).
+        clock.advance(Duration::from_secs(2));
+        let _expired = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        assert_eq!(cached.cache_stats().hits, 2);
+        assert_eq!(cached.cache_stats().misses, 2);
+
+        // The recompute refreshed the entry, so the next search hits again.
+        let _hit3 = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        assert_eq!(cached.cache_stats().hits, 3);
+    }
+
+    #[test]
+    fn ttl_boundary_is_exclusive() {
+        let clock = Arc::new(ManualClock::new());
+        let config = CacheConfig::new().capacity(8).ttl(Duration::from_secs(10));
+        let cached = CachedIndex::with_config_in(stub_index(), config, clock.clone());
+
+        let _miss = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        // Exactly at the TTL counts as expired (`elapsed >= ttl`).
+        clock.advance(Duration::from_secs(10));
+        let _again = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        assert_eq!(cached.cache_stats().hits, 0);
+        assert_eq!(cached.cache_stats().misses, 2);
+    }
+
+    #[test]
+    fn no_ttl_never_expires_even_as_time_passes() {
+        let clock = Arc::new(ManualClock::new());
+        let config = CacheConfig::new().capacity(8); // no TTL
+        let cached = CachedIndex::with_config_in(stub_index(), config, clock.clone());
+
+        let _miss = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        let _hit = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        // Advance far beyond any plausible TTL: still a hit, because none is set.
+        clock.advance(Duration::from_secs(60 * 60 * 24 * 365));
+        let _hit2 = cached.search(&[1.0, 0.0, 0.0], &params()).unwrap();
+        assert_eq!(cached.cache_stats().hits, 2);
+        assert_eq!(cached.cache_stats().misses, 1);
     }
 }

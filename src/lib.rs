@@ -16,7 +16,8 @@
 //! - **Tier 1 — the lazy path.** [`CachedIndex::new`] wraps an index with a
 //!   sensible default capacity. That is the whole common case.
 //! - **Tier 2 — the configured path.** [`CachedIndex::with_capacity`] sizes the
-//!   cache (or disables it with `0`).
+//!   cache (or disables it with `0`), and [`CachedIndex::with_config`] takes a
+//!   [`CacheConfig`] to set capacity and an optional TTL together.
 //! - **Tier 3 — the trait seam.** `CachedIndex<I>` implements
 //!   [`IndexCore`](iqdb_index::IndexCore), so it composes with any index that
 //!   does.
@@ -61,11 +62,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod cached;
+mod config;
 mod key;
 mod lru;
 mod stats;
 
 pub use crate::cached::CachedIndex;
+pub use crate::config::CacheConfig;
 pub use crate::stats::CacheStats;
 
 /// The version of this crate, taken from `Cargo.toml` at compile time.

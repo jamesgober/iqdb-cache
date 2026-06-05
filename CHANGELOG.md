@@ -21,6 +21,32 @@
 
 ---
 
+## [0.3.0] - 2026-06-05
+
+Result-cache time-to-live. Cached results can now be given an expiry, so a
+search served from cache is bounded in age — not just invalidated on mutation.
+The time source is `clock-lib`, so TTL behaviour is verified deterministically
+with a mock clock rather than `sleep`.
+
+### Added
+
+- `CacheConfig`: a Tier-2 builder for `capacity` and an optional `ttl`, plus
+  `CachedIndex::with_config` to construct from it and `CachedIndex::ttl` to read
+  the configured TTL back.
+- Per-entry TTL on the result cache: an entry older than the configured `ttl` is
+  treated as a miss and recomputed. Mutations still invalidate exactly,
+  independent of TTL; with no TTL (the default) the clock is never consulted.
+- Deterministic TTL unit tests using `clock-lib`'s `ManualClock` (expiry,
+  boundary, and never-expire-without-TTL), an integration suite over the public
+  `CacheConfig` surface, and a `cache_hit_ttl` benchmark.
+
+### Changed
+
+- Added the `clock-lib` 1.0 dependency (the iQDB time standard) for monotonic,
+  mockable time.
+
+---
+
 ## [0.2.0] - 2026-06-05
 
 The first functional release: the `CachedIndex` wrapper and a bounded LRU result
@@ -68,6 +94,7 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `REPS.md` compliance baseline.
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
-[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jamesgober/iqdb-cache/releases/tag/v0.1.0

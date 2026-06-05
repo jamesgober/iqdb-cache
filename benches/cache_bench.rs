@@ -9,9 +9,10 @@
 
 use std::hint::black_box;
 use std::sync::Arc;
+use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use iqdb_cache::CachedIndex;
+use iqdb_cache::{CacheConfig, CachedIndex};
 use iqdb_index::{Index, IndexCore, IndexStats};
 use iqdb_types::{DistanceMetric, Hit, IqdbError, Metadata, Result, SearchParams, VectorId};
 
@@ -113,6 +114,23 @@ fn bench_cache(c: &mut Criterion) {
     let _warm = cached.search(&query, &params).expect("warm");
     group.bench_function("cache_hit", |b| {
         b.iter(|| black_box(cached.search(black_box(&query), &params).expect("search")))
+    });
+
+    // Hit path with a TTL set: the same hit plus one monotonic clock read for
+    // the expiry check.
+    let ttl_cached = CachedIndex::with_config(
+        build(dim, n),
+        CacheConfig::new().ttl(Duration::from_secs(60)),
+    );
+    let _warm = ttl_cached.search(&query, &params).expect("warm");
+    group.bench_function("cache_hit_ttl", |b| {
+        b.iter(|| {
+            black_box(
+                ttl_cached
+                    .search(black_box(&query), &params)
+                    .expect("search"),
+            )
+        })
     });
 
     group.finish();
