@@ -9,10 +9,10 @@
 #╚═══════════════════════════════╝
 [package]
 name    = "iqdb-cache"
-version = "0.1.0"
+version = "0.2.0"
 
 # Minimum Supported Rust Version (MSRV)
-rust-version = "1.85"
+rust-version = "1.87"
 edition = "2024"
 
 # License
@@ -46,7 +46,8 @@ documentation = "https://docs.rs/iqdb-cache"
 
 # Authors
 authors = [
-    "James Gober <me@jamesgober.com>"
+    "James Gober <me@jamesgober.com>",
+    "Matt Callahan <matthewcallahan01@icloud.com>"
 ]
 
 [package.metadata.docs.rs]
@@ -61,17 +62,22 @@ path = "src/lib.rs"
 # FEATURE FLAGS
 # #################################
 [features]
-default = ["std"]
-# Standard library.
-std = []
-# Serialization support.
+# Default build: the cache wrapper over the std index traits, no optional
+# dependencies. The crate is std-only — it builds on `iqdb-index`, which is.
+default = []
+# Derive `serde::{Serialize, Deserialize}` for `CacheStats`.
 serde = ["dep:serde"]
 
 
 # DEPENDENCIES
 # #################################
 [dependencies]
-serde = { version = "1", optional = true, default-features = false, features = ["derive", "alloc"] }
+# The shared iQDB vocabulary: VectorId, Hit, SearchParams, DistanceMetric, Filter.
+iqdb-types = "1.0.0"
+# The trait this crate wraps: any `IndexCore` becomes a `CachedIndex`.
+iqdb-index = "1.0.0"
+# Optional: `CacheStats` serialization.
+serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 
 
 # DEV DEPENDENCIES

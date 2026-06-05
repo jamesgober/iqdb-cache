@@ -15,11 +15,15 @@ Compiles, CI green, structure correct, no domain logic.
 
 ---
 
-## v0.2.0 -- `CachedIndex` wrapper + LRU vector cache (THE HARD PART, NOT DEFERRED)
+## v0.2.0 -- `CachedIndex` wrapper + LRU vector cache (DONE)
+
+The drop-in `IndexCore` wrapper and the bounded, arena-backed LRU result cache,
+with mutation-exact invalidation. Searches are memoized; every write invalidates.
 
 Exit criteria:
-- [ ] Every public item has rustdoc + a runnable example.
-- [ ] Core invariants property-tested.
+- [x] Every public item has rustdoc + a runnable example.
+- [x] Core invariants property-tested (transparency, no-stale-after-mutation,
+  capacity bound) against a brute-force reference index.
 
 ---
 
