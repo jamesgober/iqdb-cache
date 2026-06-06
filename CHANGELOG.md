@@ -18,6 +18,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.5.0] - 2026-06-05
+
+Concurrency model-checking and the **API freeze**. The shared-cache path is now
+verified with `loom`, and the public surface is committed: no breaking changes
+until 2.0.
+
+### Added
+
+- `loom` model checks (`tests/loom_iqdb_cache.rs`) for concurrent `search`
+  through `&self`, exploring every interleaving of two threads against one
+  cache — consistent results, no deadlock, exact lookup accounting.
+- `src/sync.rs`: a `--cfg loom` shim that swaps the cache `Mutex` and the
+  counters for loom's instrumented types while leaving normal builds on `std`.
+
+### Changed
+
+- **Public API frozen** for the 1.x series (recorded in `dev/ROADMAP.md`). Only
+  additive, non-breaking changes from here until 2.0.
+- Mutation invalidation now clears through the cache lock rather than
+  `Mutex::get_mut`, so the same path is exercised under loom.
+- Declared the `loom`/`docsrs` build cfgs via `[lints.rust]` `check-cfg`.
+
+### Security
+
+- `cargo audit` and `cargo deny check` pass (advisories, bans, licenses, and
+  sources all clean).
+
+---
+
 ## [0.4.0] - 2026-06-05
 
 Eviction policies and an eviction counter — and the **feature freeze**. The
@@ -123,7 +152,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `REPS.md` compliance baseline.
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
-[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.1.0...v0.2.0

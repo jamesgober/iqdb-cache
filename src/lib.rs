@@ -67,6 +67,7 @@ mod key;
 mod ordered;
 mod policy;
 mod stats;
+mod sync;
 
 pub use crate::cached::CachedIndex;
 pub use crate::config::{CacheConfig, EvictionPolicy};

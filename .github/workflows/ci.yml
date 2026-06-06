@@ -45,7 +45,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Loom
-        run: cargo test --test loom_iqdb_cache || echo "(loom test not yet present)"
+        run: cargo test --test loom_iqdb_cache
         env:
           RUSTFLAGS: "--cfg loom"
 

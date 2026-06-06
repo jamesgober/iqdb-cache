@@ -2,8 +2,6 @@
 
 use core::time::Duration;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use clock_lib::{Clock, Monotonic, SystemClock};
 use iqdb_index::{IndexCore, IndexStats};
@@ -13,6 +11,7 @@ use crate::config::{CacheConfig, EvictionPolicy};
 use crate::key::ResultKey;
 use crate::policy::PolicyCache;
 use crate::stats::CacheStats;
+use crate::sync::{AtomicU64, Mutex, MutexGuard, Ordering};
 
 /// A cached search result plus the moment it was stored.
 ///
@@ -280,10 +279,7 @@ impl<I: IndexCore> CachedIndex<I> {
     /// (for example, after the wrapped index was changed through a handle other
     /// than this wrapper).
     pub fn clear_cache(&mut self) {
-        match self.cache.get_mut() {
-            Ok(cache) => cache.clear(),
-            Err(poisoned) => poisoned.into_inner().clear(),
-        }
+        self.lock_cache().clear();
     }
 
     /// A snapshot of the cache's hit/miss counters and occupancy.
@@ -304,7 +300,7 @@ impl<I: IndexCore> CachedIndex<I> {
     /// A poisoned result cache is safe to keep using: a half-finished insert
     /// can at worst drop or duplicate a memoized entry, never corrupt a result,
     /// so recovery is preferable to propagating the panic.
-    fn lock_cache(&self) -> std::sync::MutexGuard<'_, PolicyCache<ResultKey, CacheEntry>> {
+    fn lock_cache(&self) -> MutexGuard<'_, PolicyCache<ResultKey, CacheEntry>> {
         self.cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -322,13 +318,10 @@ impl<I: IndexCore> CachedIndex<I> {
         }
     }
 
-    /// Empties the cache through `&mut self` after a mutation.
+    /// Empties the cache after a mutation. Takes `&mut self`, so the lock is
+    /// always uncontended here.
     fn invalidate(&mut self) {
-        // `&mut self` guarantees exclusive access, so no lock is contended.
-        match self.cache.get_mut() {
-            Ok(cache) => cache.clear(),
-            Err(poisoned) => poisoned.into_inner().clear(),
-        }
+        self.lock_cache().clear();
     }
 }
 

@@ -1,13 +1,13 @@
 # iqdb-cache &mdash; API Reference
 
 > Complete reference for **every** public item in `iqdb-cache` as of
-> **v0.4.0**: what it is, its parameters and return shape, the traits it
+> **v0.5.0**: what it is, its parameters and return shape, the traits it
 > implements, and worked examples for each use case.
 >
-> **Status: pre-1.0.** The public surface is being designed across the 0.x
-> series and frozen at `1.0.0`. Sections marked _(planned)_ describe the
-> intended surface as it lands. The `doc_stub` module is documentation-only
-> scaffolding and is **not** part of the public API.
+> **Status: API frozen (pre-1.0).** As of 0.5.0 the public surface is committed
+> for the 1.x series — only additive, non-breaking changes until 2.0 (the frozen
+> surface is recorded in `dev/ROADMAP.md`). The `doc_stub` module is
+> documentation-only scaffolding and is **not** part of the public API.
 
 ## Table of Contents
 

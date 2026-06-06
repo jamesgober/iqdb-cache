@@ -9,7 +9,7 @@
 #╚═══════════════════════════════╝
 [package]
 name    = "iqdb-cache"
-version = "0.4.0"
+version = "0.5.0"
 
 # Minimum Supported Rust Version (MSRV)
 rust-version = "1.87"
@@ -54,6 +54,12 @@ authors = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+# `loom` and `docsrs` are first-party build cfgs this crate sets deliberately
+# (loom concurrency model-checking; docs.rs feature gating). Declare them so the
+# `unexpected_cfgs` lint stays quiet under `#![deny(warnings)]`.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(docsrs)'] }
+
 [lib]
 name = "iqdb_cache"
 path = "src/lib.rs"
@@ -88,7 +94,10 @@ serde = { version = "1", optional = true, default-features = false, features = [
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
 
-[target.'cfg(loom)'.dev-dependencies]
+# Loom is a real dependency under `--cfg loom` (the library swaps its `Mutex` and
+# atomics for loom's instrumented types via `src/sync.rs`), not just a dev-dep.
+# It is pulled only when concurrency model-checking; normal builds never see it.
+[target.'cfg(loom)'.dependencies]
 loom = "0.7"
 
 

@@ -52,10 +52,30 @@ Exit criteria:
 
 ---
 
-## v0.5.0 -- concurrency (loom) + API freeze
+## v0.5.0 -- concurrency (loom) + API freeze (DONE)
+
+`loom` model checks for the shared-cache path (two threads, every interleaving),
+via a `--cfg loom` sync shim (`src/sync.rs`). `cargo audit` + `cargo deny` clean.
 
 Exit criteria:
-- [ ] Public API frozen (recorded here). `cargo audit` + `cargo deny` clean.
+- [x] Public API frozen (recorded below). `cargo audit` + `cargo deny` clean.
+
+### Frozen public API (1.x compatible from here)
+
+The surface below is committed: no breaking changes until 2.0. Only additive,
+non-breaking changes within 1.x. The `doc_stub` module is `#[doc(hidden)]` and
+explicitly **not** part of the stable API.
+
+- `iqdb_cache::VERSION: &str`
+- `CachedIndex<I>` (where `I: iqdb_index::IndexCore`):
+  - `new`, `with_capacity`, `with_config`
+  - `capacity`, `ttl`, `policy`, `is_enabled`, `get_ref`, `into_inner`,
+    `clear_cache`, `cache_stats`
+  - `impl IndexCore for CachedIndex<I>` (transparent forwarding + memoization)
+- `CacheConfig`: `new`, `capacity`, `ttl`, `no_ttl`, `policy`, `Default`
+- `EvictionPolicy` (`#[non_exhaustive]`): `Lru` (default), `Lfu`, `Fifo`, `Arc`
+- `CacheStats` (fields `hits`, `misses`, `evictions`, `len`, `capacity`):
+  `lookups`, `hit_rate`
 
 ---
 
