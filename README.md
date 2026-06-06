@@ -29,7 +29,7 @@
         <strong>MSRV is 1.87+</strong> (Rust 2024 edition). LRU result cache. Mutation-exact invalidation. Optional TTL. Off by default.
     </p>
     <blockquote>
-        <strong>Status: API frozen (pre-1.0).</strong> As of <code>0.5.0</code> the public API is committed for the 1.x series &mdash; no breaking changes until 2.0. See <a href="./CHANGELOG.md"><code>CHANGELOG.md</code></a>.
+        <strong>Status: stable (1.0).</strong> The public API is committed under SemVer for the 1.x series &mdash; no breaking changes until 2.0. See <a href="./CHANGELOG.md"><code>CHANGELOG.md</code></a>.
     </blockquote>
 </div>
 
@@ -53,7 +53,7 @@
 
 ```toml
 [dependencies]
-iqdb-cache = "0.5"
+iqdb-cache = "1.0"
 ```
 
 <br>
@@ -154,22 +154,36 @@ cached, so a later identical search re-runs against the index.
 
 <br>
 
+## Examples
+
+Runnable examples live in [`examples/`](./examples):
+
+```sh
+cargo run --example quickstart   # wrap an index; first search misses, the repeat hits
+cargo run --example policies     # the four eviction policies side by side
+cargo run --example tuning       # capacity + TTL + policy via CacheConfig, and invalidation
+```
+
+<br>
+
 ## Status
 
-<code>v0.5.0</code> &mdash; the `CachedIndex` wrapper, mutation-exact invalidation, an
-optional per-entry TTL (via `clock-lib`, tested deterministically with a mock
-clock), and **four eviction policies** (LRU, LFU, FIFO, ARC) behind one config
-knob. The feature set is frozen, and as of 0.5 **the public API is frozen** for
-the 1.x series. Every core invariant is property-tested against a brute-force
-reference index under every policy (the cache is transparent and bounded; a write
-is never stale); the shared-cache path is `loom`-model-checked across thread
-interleavings; `cargo audit` and `cargo deny` pass; and the hit path is
-benchmarked: on the reference machine a 10k-vector / dim-64 search costs
-**~234&nbsp;µs** uncached versus **~250&nbsp;ns** from cache — a ~940&times;
-speedup (FIFO ~250&nbsp;ns, LRU ~278&nbsp;ns, ARC ~387&nbsp;ns, LFU ~1.17&nbsp;µs;
-a TTL adds ~29&nbsp;ns). The run to 1.0 is alpha/beta/rc hardening per the
-<a href="./dev/ROADMAP.md"><code>ROADMAP</code></a>. The full surface is documented
-in <a href="./docs/API.md"><code>docs/API.md</code></a>.
+<code>v1.0.0</code> &mdash; **stable.** The `CachedIndex` wrapper, mutation-exact
+invalidation, an optional per-entry TTL (via `clock-lib`, tested deterministically
+with a mock clock), and **four eviction policies** (LRU, LFU, FIFO, ARC) behind
+one config knob. The public API is committed under SemVer for the 1.x series (no
+breaking changes until 2.0; the frozen surface is recorded in the
+<a href="./dev/ROADMAP.md"><code>ROADMAP</code></a>). Every core invariant is
+property-tested against a brute-force reference index under every policy (the
+cache is transparent and bounded; a write is never stale); the shared-cache path
+is `loom`-model-checked across thread interleavings; the cache is validated
+against a realistic consumer workload (hot-set queries + a read/write mix);
+`cargo audit` and `cargo deny` pass; and it is verified on Windows + Linux across
+stable and the 1.87 MSRV. The hit path is benchmarked: on the reference machine a
+10k-vector / dim-64 search costs **~234&nbsp;µs** uncached versus **~250&nbsp;ns**
+from cache — a ~940&times; speedup (FIFO ~250&nbsp;ns, LRU ~278&nbsp;ns, ARC
+~387&nbsp;ns, LFU ~1.17&nbsp;µs; a TTL adds ~29&nbsp;ns). The full surface is
+documented in <a href="./docs/API.md"><code>docs/API.md</code></a>.
 
 <hr>
 <br>

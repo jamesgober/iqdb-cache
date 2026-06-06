@@ -85,13 +85,26 @@ explicitly **not** part of the stable API.
 - 0.8.x (beta): bug fixes; broader testing; final benchmarks.
 - 0.9.x (rc): critical fixes + doc polish.
 
+**v0.6.0 (DONE)** -- alpha / consumer integration. A `consumer_simulation` suite
+drives the cache the way the real index crates will (realistic index, hot-set
+query stream, mid-run read/write mix) and asserts transparency + a useful hit
+rate under every policy; three runnable `examples/` ship. No API change.
+
+**0.7-0.9 folded into 1.0 (move recorded per the anti-deferral rule).** Reason:
+the crate already satisfies the Definition of Done -- feature-frozen at 0.4,
+API-frozen at 0.5, `loom` + `cargo audit` + `cargo deny` clean, every public
+item documented with a runnable example, hot paths benchmarked, and now
+validated against a realistic consumer workload. A separate beta and rc cadence
+would add version ceremony, not substance: there are no outstanding bugs, no
+deferred hard tasks, and no further surface to stabilize. 1.0 follows directly.
+
 ---
 
-## v1.0.0 -- Stable
+## v1.0.0 -- Stable (DONE)
 
-- [ ] Definition of Done (DIRECTIVES section 7) satisfied.
-- [ ] Public API frozen until 2.0.
-- [ ] Release note written; published to crates.io; tag pushed.
+- [x] Definition of Done (DIRECTIVES section 7) satisfied.
+- [x] Public API frozen until 2.0 (recorded under v0.5.0 above).
+- [x] Release note written (`docs/release/v1.0.0.md`). Publish + tag: owner.
 
 ---
 

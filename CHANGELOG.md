@@ -18,6 +18,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.0.0] - 2026-06-05
+
+First stable release. The public API frozen at 0.5.0 is now committed under
+SemVer for the 1.x series: no breaking changes until 2.0. Every
+Definition-of-Done criterion (`dev/DIRECTIVES.md` §7) is satisfied — the cache
+is feature-complete, verified on Windows and Linux across stable and the 1.87
+MSRV, `loom`-model-checked on the concurrent path, `cargo audit` + `cargo deny`
+clean, and validated against a realistic consumer workload under every eviction
+policy.
+
+### Added
+
+- Nothing new — 1.0.0 promotes the 0.6 surface to stable. See the 0.1.0–0.6.0
+  entries below for the full feature history (`CachedIndex` wrapper, LRU result
+  cache, mutation-exact invalidation, TTL, LRU/LFU/FIFO/ARC policies, stats).
+
+### Changed
+
+- Public API committed under SemVer for the 1.x series (frozen surface recorded
+  in `dev/ROADMAP.md`); only additive, non-breaking changes until 2.0.
+
+---
+
+## [0.6.0] - 2026-06-05
+
+Consumer integration (alpha). The crate is exercised end to end the way real
+index crates will use it, and ships runnable examples. No API change — the
+0.5 surface is frozen.
+
+### Added
+
+- `tests/consumer_simulation.rs`: a realistic workload — a 200-vector index, a
+  skewed hot-set query stream, and a mid-run insert/delete mix — asserting both
+  guarantees end to end under every policy: results always equal a bare
+  reference index (transparency, never stale), and the hit rate is high enough
+  that the cache demonstrably helps.
+- `examples/`: three runnable, documented examples — `quickstart` (wrap and
+  hit), `policies` (the four eviction policies side by side), and `tuning`
+  (capacity + TTL + policy via `CacheConfig`, plus invalidation on write), over
+  a shared brute-force demo index.
+
+---
+
 ## [0.5.0] - 2026-06-05
 
 Concurrency model-checking and the **API freeze**. The shared-cache path is now
@@ -152,7 +195,9 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `REPS.md` compliance baseline.
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
-[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.6.0...v1.0.0
+[0.6.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.2.0...v0.3.0
