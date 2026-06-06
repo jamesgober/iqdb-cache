@@ -42,9 +42,9 @@
 - **Result memoization** &mdash; identical searches (same query, same `SearchParams`) are served from an in-memory cache instead of re-running
 - **Mutation-exact invalidation** &mdash; every `insert` / `insert_batch` / `delete` clears the cache, so a search **never** observes a stale result
 - **Optional TTL** &mdash; give entries an expiry to bound staleness from changes the wrapper can't see; off by default, and verified deterministically with a mock clock
-- **Bounded LRU** &mdash; an arena-backed least-recently-used cache with amortized `O(1)` lookup, insert, and eviction; the footprint never exceeds the configured capacity
+- **Four eviction policies** &mdash; LRU (default), LFU, FIFO, and ARC, selectable through one config knob; all arena-backed with amortized `O(1)` operations and bounded to the configured capacity
 - **Off by default** &mdash; size the cache, or disable it with capacity `0` for a pure passthrough to A/B the cache's effect without touching call sites
-- **Hit/miss stats** &mdash; `CacheStats` exposes lifetime hit and miss counters plus a `hit_rate` for tuning
+- **Hit/miss/eviction stats** &mdash; `CacheStats` exposes lifetime hit, miss, and eviction counters plus a `hit_rate` for tuning
 - **Zero `unsafe`** &mdash; the whole crate is `#![forbid(unsafe_code)]`
 
 <br>
@@ -53,7 +53,7 @@
 
 ```toml
 [dependencies]
-iqdb-cache = "0.3"
+iqdb-cache = "0.4"
 ```
 
 <br>
@@ -131,6 +131,19 @@ let cached = CachedIndex::with_config(iqdb_cache::doc_stub::stub_index(), config
 assert_eq!(cached.ttl(), Some(Duration::from_secs(300)));
 ```
 
+Choose an eviction policy to match the workload — LRU (default), LFU, FIFO, or ARC:
+
+```rust
+use iqdb_cache::{CacheConfig, CachedIndex, EvictionPolicy};
+
+// LFU favours a stable hot-set where a few queries dominate.
+let cached = CachedIndex::with_config(
+    iqdb_cache::doc_stub::stub_index(),
+    CacheConfig::new().capacity(4096).policy(EvictionPolicy::Lfu),
+);
+assert_eq!(cached.policy(), EvictionPolicy::Lfu);
+```
+
 <br>
 
 ## Errors
@@ -143,17 +156,18 @@ cached, so a later identical search re-runs against the index.
 
 ## Status
 
-<code>v0.3.0</code> &mdash; the `CachedIndex` wrapper, the bounded LRU result cache
-with mutation-exact invalidation, and an optional per-entry TTL (via `clock-lib`,
-so expiry is tested deterministically with a mock clock). Every core invariant is
-property-tested against a brute-force reference index (the cache is transparent; a
-write is never stale), concurrent reads are covered, and the hit path is
-benchmarked: on the reference machine a 10k-vector / dim-64 search costs **~234&nbsp;µs**
-uncached versus **~238&nbsp;ns** from cache — a ~985&times; speedup — with a TTL
-adding ~29&nbsp;ns for the clock read. Additional eviction policies (LFU / FIFO /
-ARC) and `loom` concurrency model-checks land across the rest of the 0.x series
-per the <a href="./dev/ROADMAP.md"><code>ROADMAP</code></a>. The full surface is
-documented in <a href="./docs/API.md"><code>docs/API.md</code></a>.
+<code>v0.4.0</code> &mdash; the `CachedIndex` wrapper, mutation-exact invalidation, an
+optional per-entry TTL (via `clock-lib`, tested deterministically with a mock
+clock), and **four eviction policies** (LRU, LFU, FIFO, ARC) behind one config
+knob. The feature set is now **frozen**. Every core invariant is property-tested
+against a brute-force reference index under every policy (the cache is
+transparent and bounded; a write is never stale), concurrent reads are covered,
+and the hit path is benchmarked: on the reference machine a 10k-vector / dim-64
+search costs **~234&nbsp;µs** uncached versus **~250&nbsp;ns** from cache — a
+~940&times; speedup (FIFO ~250&nbsp;ns, LRU ~278&nbsp;ns, ARC ~387&nbsp;ns, LFU
+~1.17&nbsp;µs; a TTL adds ~29&nbsp;ns). `loom` concurrency model-checks and the
+API freeze land at 0.5 per the <a href="./dev/ROADMAP.md"><code>ROADMAP</code></a>.
+The full surface is documented in <a href="./docs/API.md"><code>docs/API.md</code></a>.
 
 <hr>
 <br>

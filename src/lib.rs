@@ -64,11 +64,12 @@
 mod cached;
 mod config;
 mod key;
-mod lru;
+mod ordered;
+mod policy;
 mod stats;
 
 pub use crate::cached::CachedIndex;
-pub use crate::config::CacheConfig;
+pub use crate::config::{CacheConfig, EvictionPolicy};
 pub use crate::stats::CacheStats;
 
 /// The version of this crate, taken from `Cargo.toml` at compile time.

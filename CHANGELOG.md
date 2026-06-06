@@ -1,11 +1,8 @@
-<h1 align="center">
-    <img width="90px" height="auto" src="https://raw.githubusercontent.com/jamesgober/jamesgober/main/media/icons/hexagon-3.svg" alt="Triple Hexagon">
-    <br><b>CHANGELOG</b>
-</h1>
-<p>
-  All notable changes to <code>iqdb-cache</code> will be documented in this file. The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
-  and this project adheres to <a href="https://semver.org/spec/v2.0.0.html/">Semantic Versioning</a>.
-</p>
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
@@ -18,6 +15,38 @@
 ### Fixed
 
 ### Security
+
+---
+
+## [0.4.0] - 2026-06-05
+
+Eviction policies and an eviction counter — and the **feature freeze**. The
+cache now offers four eviction strategies behind one configuration knob, and the
+public feature set is complete: the run to 1.0 is hardening, not new surface.
+
+### Added
+
+- `EvictionPolicy` (`Lru`, `Lfu`, `Fifo`, `Arc`) selectable via
+  `CacheConfig::policy`, with `CachedIndex::policy` to read it back. LRU is the
+  default.
+  - **LRU / FIFO** share one arena-backed recency list (LRU promotes on access,
+    FIFO does not).
+  - **LFU** evicts the least-frequently-used entry, tie-broken by
+    least-recently-used, with `O(1)` eviction via a min-frequency pointer.
+  - **ARC** (Adaptive Replacement Cache) balances recency and frequency with
+    ghost lists, adapting to the workload; occupancy stays within capacity.
+- `CacheStats::evictions`: a lifetime counter of entries discarded by the policy.
+- Property tests that every policy stays transparent (matches a reference index)
+  and bounded under capacity pressure, an eviction-counter integration test, and
+  a `policy_hit` benchmark across all four policies.
+
+### Changed
+
+- Reworked the cache internals onto a shared `OrderedMap` primitive (an
+  arena-backed linked hash map) that all four policies compose. The default-LRU
+  hit path is within ~5% of 0.3 (~250 ns vs ~238 ns at 10k/dim-64).
+- **Feature freeze:** no `todo!`/`unimplemented!` anywhere; the public feature
+  set is frozen. 0.5 freezes the API surface; 0.6+ is stabilization.
 
 ---
 
@@ -94,7 +123,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `REPS.md` compliance baseline.
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
-[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jamesgober/iqdb-cache/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jamesgober/iqdb-cache/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jamesgober/iqdb-cache/releases/tag/v0.1.0

@@ -9,9 +9,9 @@ use clock_lib::{Clock, Monotonic, SystemClock};
 use iqdb_index::{IndexCore, IndexStats};
 use iqdb_types::{DistanceMetric, Hit, Metadata, Result, SearchParams, VectorId};
 
-use crate::config::CacheConfig;
+use crate::config::{CacheConfig, EvictionPolicy};
 use crate::key::ResultKey;
-use crate::lru::LruCache;
+use crate::policy::PolicyCache;
 use crate::stats::CacheStats;
 
 /// A cached search result plus the moment it was stored.
@@ -126,9 +126,11 @@ pub struct CachedIndex<I> {
     /// The wrapped index every call forwards to.
     inner: I,
     /// The result cache, guarded for `&self` search access.
-    cache: Mutex<LruCache<ResultKey, CacheEntry>>,
+    cache: Mutex<PolicyCache<ResultKey, CacheEntry>>,
     /// Configured capacity, mirrored here for `0`-means-disabled fast paths.
     capacity: usize,
+    /// Configured eviction policy, mirrored here for introspection.
+    policy: EvictionPolicy,
     /// Optional per-entry time-to-live; `None` means entries expire only on
     /// mutation.
     ttl: Option<Duration>,
@@ -139,6 +141,8 @@ pub struct CachedIndex<I> {
     hits: AtomicU64,
     /// Lifetime count of cache misses.
     misses: AtomicU64,
+    /// Lifetime count of entries discarded by the eviction policy.
+    evictions: AtomicU64,
 }
 
 impl<I: IndexCore> CachedIndex<I> {
@@ -206,12 +210,14 @@ impl<I: IndexCore> CachedIndex<I> {
     pub(crate) fn with_config_in(inner: I, config: CacheConfig, clock: Arc<dyn Clock>) -> Self {
         Self {
             inner,
-            cache: Mutex::new(LruCache::with_capacity(config.capacity)),
+            cache: Mutex::new(PolicyCache::new(config.policy, config.capacity)),
             capacity: config.capacity,
+            policy: config.policy,
             ttl: config.ttl,
             clock,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
+            evictions: AtomicU64::new(0),
         }
     }
 
@@ -228,6 +234,13 @@ impl<I: IndexCore> CachedIndex<I> {
     #[must_use]
     pub fn ttl(&self) -> Option<Duration> {
         self.ttl
+    }
+
+    /// The configured eviction policy.
+    #[inline]
+    #[must_use]
+    pub fn policy(&self) -> EvictionPolicy {
+        self.policy
     }
 
     /// Whether caching is active (`capacity > 0`).
@@ -280,6 +293,7 @@ impl<I: IndexCore> CachedIndex<I> {
         CacheStats {
             hits: self.hits.load(Ordering::Relaxed),
             misses: self.misses.load(Ordering::Relaxed),
+            evictions: self.evictions.load(Ordering::Relaxed),
             len,
             capacity: self.capacity,
         }
@@ -290,7 +304,7 @@ impl<I: IndexCore> CachedIndex<I> {
     /// A poisoned result cache is safe to keep using: a half-finished insert
     /// can at worst drop or duplicate a memoized entry, never corrupt a result,
     /// so recovery is preferable to propagating the panic.
-    fn lock_cache(&self) -> std::sync::MutexGuard<'_, LruCache<ResultKey, CacheEntry>> {
+    fn lock_cache(&self) -> std::sync::MutexGuard<'_, PolicyCache<ResultKey, CacheEntry>> {
         self.cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -375,15 +389,18 @@ impl<I: IndexCore> IndexCore for CachedIndex<I> {
         let hits = self.inner.search(query, params)?;
         let _ = self.misses.fetch_add(1, Ordering::Relaxed);
         let stamp = self.ttl.map(|_| self.clock.now());
-        {
+        let evicted = {
             let mut cache = self.lock_cache();
-            let _evicted = cache.put(
+            cache.put(
                 key,
                 CacheEntry {
                     hits: hits.clone().into_boxed_slice(),
                     stamp,
                 },
-            );
+            )
+        };
+        if evicted {
+            let _ = self.evictions.fetch_add(1, Ordering::Relaxed);
         }
         Ok(hits)
     }

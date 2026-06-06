@@ -1,7 +1,7 @@
 # iqdb-cache &mdash; API Reference
 
 > Complete reference for **every** public item in `iqdb-cache` as of
-> **v0.3.0**: what it is, its parameters and return shape, the traits it
+> **v0.4.0**: what it is, its parameters and return shape, the traits it
 > implements, and worked examples for each use case.
 >
 > **Status: pre-1.0.** The public surface is being designed across the 0.x
@@ -16,17 +16,17 @@
   - [`VERSION`](#version)
 - [Configuration](#configuration)
   - [`CacheConfig`](#cacheconfig)
+  - [`EvictionPolicy`](#evictionpolicy)
 - [The cache wrapper](#the-cache-wrapper)
   - [`CachedIndex`](#cachedindex)
   - [Construction &mdash; `new` / `with_capacity` / `with_config`](#construction)
   - [Searching through the cache](#searching-through-the-cache)
   - [Mutation &amp; invalidation](#mutation--invalidation)
   - [Time-to-live](#time-to-live)
-  - [Introspection &mdash; `capacity`, `ttl`, `is_enabled`, `get_ref`, `into_inner`, `clear_cache`](#introspection)
+  - [Introspection &mdash; `capacity`, `ttl`, `policy`, `is_enabled`, `get_ref`, `into_inner`, `clear_cache`](#introspection)
 - [Statistics](#statistics)
   - [`CacheStats`](#cachestats)
   - [`cache_stats`](#cache_stats)
-- [Eviction policies](#eviction-policies) _(planned: 0.4)_
 - [Errors](#errors)
 - [Feature flags](#feature-flags)
 - [Trait implementation matrix](#trait-implementation-matrix)
@@ -94,25 +94,60 @@ Implements `Debug`, `Clone`, `PartialEq`, and `Eq`.
 
 | Method | Default | Effect |
 |---|---|---|
-| `CacheConfig::new()` | &mdash; | Capacity `1024`, no TTL. |
+| `CacheConfig::new()` | &mdash; | Capacity `1024`, no TTL, LRU. |
 | `.capacity(n: usize)` | `1024` | Max distinct cached searches; `0` disables caching. |
 | `.ttl(d: Duration)` | none | Per-entry time-to-live; expired results are recomputed. |
 | `.no_ttl()` | &mdash; | Clears a previously set TTL. |
+| `.policy(p: EvictionPolicy)` | `Lru` | Which entry to evict when full. |
 
 All setters take `self` and return `Self`.
 
 ```rust
 use std::time::Duration;
 
-use iqdb_cache::{CacheConfig, CachedIndex};
+use iqdb_cache::{CacheConfig, CachedIndex, EvictionPolicy};
 
 let config = CacheConfig::new()
     .capacity(4096)
-    .ttl(Duration::from_secs(30));
+    .ttl(Duration::from_secs(30))
+    .policy(EvictionPolicy::Arc);
 
 let cached = CachedIndex::with_config(iqdb_cache::doc_stub::stub_index(), config);
 assert_eq!(cached.capacity(), 4096);
 assert_eq!(cached.ttl(), Some(Duration::from_secs(30)));
+assert_eq!(cached.policy(), EvictionPolicy::Arc);
+```
+
+### `EvictionPolicy`
+
+```rust
+#[non_exhaustive]
+pub enum EvictionPolicy { Lru, Lfu, Fifo, Arc }
+```
+
+Which entry an eviction discards when the cache is full. All four keep the cache
+within capacity and never affect *correctness* — only the hit rate. `Default` is
+`Lru`. Implements `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash` (and
+`serde` with the feature). `#[non_exhaustive]`, so `match` on it needs a `_` arm.
+
+| Variant | Evicts | Best for |
+|---|---|---|
+| `Lru` (default) | the least-recently-used entry | shifting query hot-sets; the strongest general default |
+| `Lfu` | the least-frequently-used entry (ties: LRU) | stable, skewed workloads where a few queries dominate |
+| `Fifo` | the oldest *inserted* entry, ignoring access | uniform reuse; the cheapest policy |
+| `Arc` | adaptively, balancing recency and frequency | workloads that shift between the two |
+
+```rust
+use iqdb_cache::{CacheConfig, CachedIndex, EvictionPolicy};
+
+assert_eq!(EvictionPolicy::default(), EvictionPolicy::Lru);
+
+// Pick LFU for a workload with a stable hot-set.
+let cached = CachedIndex::with_config(
+    iqdb_cache::doc_stub::stub_index(),
+    CacheConfig::new().policy(EvictionPolicy::Lfu),
+);
+assert_eq!(cached.policy(), EvictionPolicy::Lfu);
 ```
 
 ---
@@ -353,6 +388,14 @@ pub fn ttl(&self) -> Option<Duration>
 The configured per-entry time-to-live, or `None` when results expire only on
 mutation.
 
+#### `policy`
+
+```rust
+pub fn policy(&self) -> EvictionPolicy
+```
+
+The configured [`EvictionPolicy`](#evictionpolicy).
+
 #### `is_enabled`
 
 ```rust
@@ -420,13 +463,15 @@ assert_eq!(cached.cache_stats().len, 0);
 pub struct CacheStats {
     pub hits: u64,
     pub misses: u64,
+    pub evictions: u64,
     pub len: usize,
     pub capacity: usize,
 }
 ```
 
-A point-in-time snapshot of a cache. `hits` and `misses` are monotonic counters
-over the cache's lifetime; `len` and `capacity` describe its current occupancy.
+A point-in-time snapshot of a cache. `hits`, `misses`, and `evictions` are
+monotonic counters over the cache's lifetime; `len` and `capacity` describe its
+current occupancy. `evictions` counts entries the policy discarded to make room.
 Implements `Debug`, `Clone`, `Copy`, `PartialEq`, and `Eq` (and
 `Serialize`/`Deserialize` with the `serde` feature).
 
@@ -450,7 +495,7 @@ there have been no lookups, so the result is always finite.
 ```rust
 use iqdb_cache::CacheStats;
 
-let stats = CacheStats { hits: 90, misses: 10, len: 64, capacity: 128 };
+let stats = CacheStats { hits: 90, misses: 10, evictions: 5, len: 64, capacity: 128 };
 assert_eq!(stats.lookups(), 100);
 assert!((stats.hit_rate() - 0.9).abs() < 1e-9);
 ```
@@ -483,16 +528,6 @@ assert!(stats.hit_rate() > 0.0);
 
 ---
 
-## Eviction policies
-
-_(planned: 0.4)_
-
-v0.3 ships a single eviction policy: least-recently-used (LRU). LFU, FIFO, and
-ARC, selectable through [`CacheConfig`](#cacheconfig), land at 0.4 with a
-feature freeze.
-
----
-
 ## Errors
 
 `CachedIndex` introduces **no errors of its own**. Every fallible method
@@ -519,6 +554,7 @@ first-party crates, `iqdb-types` and `iqdb-index`, which are always pulled.
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | `CachedIndex<I>` | — | — | — | — | ✅ (when `I: IndexCore`) | — |
 | `CacheConfig` | ✅ | ✅ | — | ✅ | — | — |
+| `EvictionPolicy` | ✅ | ✅ | ✅ | ✅ (+ `Hash`) | — | ✅ (feature) |
 | `CacheStats` | ✅ | ✅ | ✅ | ✅ | — | ✅ (feature) |
 
 ---

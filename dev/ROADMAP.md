@@ -39,10 +39,16 @@ Exit criteria:
 
 ---
 
-## v0.4.0 -- LFU/FIFO/ARC policies + stats + feature freeze
+## v0.4.0 -- LFU/FIFO/ARC policies + stats + feature freeze (DONE)
+
+`EvictionPolicy` (Lru/Lfu/Fifo/Arc) via `CacheConfig::policy`, all four built on
+a shared arena `OrderedMap`. `CacheStats::evictions` counter. Per-policy
+transparency + capacity property tests; per-policy hit benchmark.
 
 Exit criteria:
-- [ ] No `todo!`/`unimplemented!`. Feature freeze declared.
+- [x] No `todo!`/`unimplemented!`. **Feature freeze declared:** the public
+  feature set (wrapper, TTL, four policies, stats) is complete; the run to 1.0
+  is hardening, not new surface.
 
 ---
 

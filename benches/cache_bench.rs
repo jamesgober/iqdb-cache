@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use iqdb_cache::{CacheConfig, CachedIndex};
+use iqdb_cache::{CacheConfig, CachedIndex, EvictionPolicy};
 use iqdb_index::{Index, IndexCore, IndexStats};
 use iqdb_types::{DistanceMetric, Hit, IqdbError, Metadata, Result, SearchParams, VectorId};
 
@@ -136,5 +136,31 @@ fn bench_cache(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_cache);
+/// Hit-path cost per eviction policy: warm a single query, then measure the
+/// repeated hit. Highlights the per-policy access bookkeeping (LRU/ARC reorder,
+/// LFU bumps a frequency bucket, FIFO does nothing).
+fn bench_policies(c: &mut Criterion) {
+    let dim = 64;
+    let n = 10_000;
+    let params = SearchParams::new(10, DistanceMetric::Euclidean);
+    let query: Vec<f32> = (0..dim).map(|d| d as f32 + 0.5).collect();
+
+    let mut group = c.benchmark_group("policy_hit_10k_dim64");
+    for policy in [
+        EvictionPolicy::Lru,
+        EvictionPolicy::Lfu,
+        EvictionPolicy::Fifo,
+        EvictionPolicy::Arc,
+    ] {
+        let cached = CachedIndex::with_config(build(dim, n), CacheConfig::new().policy(policy));
+        let _warm = cached.search(&query, &params).expect("warm");
+        let label = format!("{policy:?}");
+        group.bench_function(&label, |b| {
+            b.iter(|| black_box(cached.search(black_box(&query), &params).expect("search")))
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_cache, bench_policies);
 criterion_main!(benches);
