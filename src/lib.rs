@@ -1,6 +1,6 @@
 //! # iqdb-cache
 //!
-//! An in-process caching layer for the HiveDB **iqdb** vector-database spine.
+//! An in-process caching layer for the **iqdb** vector-database spine.
 //! For indexes that do not fit in RAM, a well-tuned cache turns repeated reads
 //! into memory reads. [`CachedIndex`] wraps any
 //! [`IndexCore`](iqdb_index::IndexCore) and memoizes search results, while
